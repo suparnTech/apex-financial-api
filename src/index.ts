@@ -5,6 +5,12 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+// Define a type for the transaction settlement payload for compile-time safety.
+interface TransactionSettlePayload {
+  amount: number;
+  currency_code: string;
+}
+
 // --- 1. REAL SWAGGER / OPENAPI ENDPOINT ---
 // This makes the onboarding URL in your UI 100% authentic.
 app.get('/docs/openapi.json', (req, res) => {
@@ -36,9 +42,21 @@ app.get('/docs/openapi.json', (req, res) => {
 // Fails when a client forgets the currency_code, causing a TypeError on .toUpperCase()
 app.post('/v2/transactions/settle', (req, res, next) => {
   try {
-    const payload = req.body;
+    // CRITICAL FIX: Explicitly type req.body to enforce compile-time type safety
+    const payload: TransactionSettlePayload = req.body;
     
-    // Deliberate Bug: Assuming currency_code always exists without checking
+    // Validate required fields at runtime as per OpenAPI spec
+    // These checks are still necessary as client input might not conform to the expected type
+    if (typeof payload.amount !== 'number' || payload.amount === null) {
+      return res.status(400).json({ error: "Missing or invalid 'amount' field. It must be a number." });
+    }
+
+    // CRITICAL FIX: Ensure currency_code is a valid string before calling .toUpperCase()
+    if (typeof payload.currency_code !== 'string' || payload.currency_code.trim() === '') {
+      return res.status(400).json({ error: "Missing or invalid 'currency_code' field. It must be a non-empty string." });
+    }
+    
+    // Now, TypeScript knows `payload.currency_code` is a string, and runtime checks ensure it's valid.
     const formattedCurrency = payload.currency_code.toUpperCase(); 
     
     res.json({ 
