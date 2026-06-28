@@ -5,6 +5,13 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+// Define a set of valid ISO 4217 currency codes for semantic validation
+const VALID_CURRENCY_CODES = new Set([
+  "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "SEK", "NZD",
+  "MXN", "SGD", "HKD", "NOK", "KRW", "TRY", "RUB", "INR", "BRL", "ZAR",
+  // Add more valid ISO 4217 currency codes as required by the business
+]);
+
 // --- 1. REAL SWAGGER / OPENAPI ENDPOINT ---
 // This makes the onboarding URL in your UI 100% authentic.
 app.get('/docs/openapi.json', (req, res) => {
@@ -32,22 +39,42 @@ app.get('/docs/openapi.json', (req, res) => {
   });
 });
 
-// --- 2. BUGGY ENTERPRISE ENDPOINT ---
-// Fails when a client forgets the currency_code, causing a TypeError on .toUpperCase()
+// --- 2. BUGGY ENTERPRISE ENDPOINT (Now fixed and robust) ---
+// Prevents TypeError and adds semantic validation for currency codes.
 app.post('/v2/transactions/settle', (req, res, next) => {
   try {
     const payload = req.body;
     
-    // Deliberate Bug: Assuming currency_code always exists without checking
-    const formattedCurrency = payload.currency_code.toUpperCase(); 
+    // 1. Validate 'amount' type and value
+    if (typeof payload.amount !== 'number' || isNaN(payload.amount)) {
+      return res.status(400).json({ error: "Validation Error: 'amount' is required and must be a number." });
+    }
+    if (payload.amount <= 0) {
+        return res.status(400).json({ error: "Validation Error: 'amount' must be a positive number." });
+    }
+
+    // 2. Validate 'currency_code' type and presence
+    if (typeof payload.currency_code !== 'string' || payload.currency_code.trim() === '') {
+      // This specifically addresses the TypeError when currency_code is missing or not a string
+      return res.status(400).json({ error: "Validation Error: 'currency_code' is required and must be a non-empty string." });
+    }
+
+    // Standardize currency code to uppercase for consistent validation and storage
+    const formattedCurrencyCode = payload.currency_code.trim().toUpperCase(); 
     
+    // 3. Validate 'currency_code' semantic validity (incorporating Senior Critique)
+    if (!VALID_CURRENCY_CODES.has(formattedCurrencyCode)) {
+      return res.status(400).json({ error: `Validation Error: '${formattedCurrencyCode}' is not a valid ISO 4217 currency code.` });
+    }
+
+    // Now all inputs are validated and safe to use
     res.json({ 
       status: "settled", 
       amount: payload.amount,
-      currency: formattedCurrency
+      currency: formattedCurrencyCode // Use the validated and formatted currency code
     });
   } catch (error) {
-    // Pass to global error handler instead of crashing the server
+    // Pass to global error handler for any unexpected server-side errors
     next(error);
   }
 });
